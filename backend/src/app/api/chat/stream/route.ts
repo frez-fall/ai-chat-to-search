@@ -7,7 +7,8 @@ import { z } from "zod";
 import { streamText } from "ai";
 import { openai } from "@ai-sdk/openai";
 
-import { db } from "../../../../services/database.js";
+import { db } from '@/services/database';
+
 // If you still need business logic from your engine, you can keep it;
 // for now we do the LLM call here to align with AI SDK v5 streaming.
 // import { chatEngine } from "../../../../lib/chat-engine/index.js";
