@@ -6,9 +6,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { db } from '../../../../../services/database.js';
-import { UpdateSearchParametersSchema } from '../../../../../models/search-parameters.js';
-import { urlGenerator } from '../../../../../lib/url-generator/index.js';
+import { db } from '@/services/database';
+import { UpdateSearchParametersSchema } from '@/models/search-parameters';
+import { urlGenerator } from '@/lib/url-generator';
 
 interface Params {
   params: {
