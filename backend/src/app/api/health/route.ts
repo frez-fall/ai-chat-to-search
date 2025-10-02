@@ -4,7 +4,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { db } from '../../../services/database.js';
+import { db } from '@/services/database';
 
 export async function GET() {
   try {
