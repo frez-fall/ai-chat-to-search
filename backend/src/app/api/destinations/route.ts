@@ -5,8 +5,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { db } from '../../../services/database.js';
-import { validateDestinationQuery } from '../../../models/destination-recommendation.js';
+import { db } from '@/services/database';
+import { validateDestinationQuery } from '@/models/destination-recommendation';
 
 // Query parameters schema
 const DestinationQuerySchema = z.object({
