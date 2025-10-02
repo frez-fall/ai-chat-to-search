@@ -6,10 +6,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { db } from '../../../../../services/database.js';
-import { chatEngine } from '../../../../../lib/chat-engine/index.js';
-import { flightParser } from '../../../../../lib/flight-parser/index.js';
-import { urlGenerator } from '../../../../../lib/url-generator/index.js';
+import { db } from '@/services/database';
+import { chatEngine } from '@/lib/chat-engine';
+import { FlightParser } from '@/lib/flight-parser';
+import { urlGenerator } from '@/lib/url-generator';
 
 // Request body schema
 const SendMessageRequestSchema = z.object({
