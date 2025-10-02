@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+/* Custom Font Declarations */
+@font-face {
+  font-family: 'BrandFont';
+  src: url('/fonts/roobert-font-regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap; /* Shows fallback immediately while loading */
+}
+
+@font-face {
+  font-family: 'BrandFont';
+  src: url('/fonts/roobert-font-semibold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Backgrounds */
+  --background: #171316;
+  --foreground: #FDFEFD;
+  
+  /* Brand Colors - Replace these with your actual brand colors */
+  --brand-primary: #1156F9; /* Example: Blue - Replace with your brand primary */
+  --brand-primary-hover: #87AAFB;
+  --brand-primary-active: #1e40af;
+  --brand-primary-light: #9EBAFB;
+  
+  --brand-secondary: #FF7433; /* Example: Green - Replace with your brand secondary */
+  --brand-secondary-hover: #FEAB83;
+  --brand-secondary-active: #FF7433;
+  --brand-secondary-light: #FEB998;
+  
+  --brand-accent: #171316; /* Example: Orange - Replace with your brand accent */
+  --brand-accent-hover: #d97706;
+  --brand-accent-active: #b45309;
+  --brand-accent-light: #fef3c7;
+  
+  /* Status Colors */
+  --brand-success: #10b981;
+  --brand-error: #ef4444;
+  --brand-warning: #f59e0b;
+  --brand-info: #3b82f6;
+  
+  /* Text Colors */
+  --text-primary: #FDFEFD;
+  --text-secondary: #9ca3af;
+  --text-tertiary: #6b7280;
+  --text-on-brand: #FDFEFD;
+  
+  /* Border Colors */
+  --border-default: #e5e7eb;
+  --border-brand: var(--brand-primary);
+  
+  /* Font Stacks with Fallbacks */
+  --font-brand: 'BrandFont', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-system: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+/* Tailwind v4 theme configuration (commented out for now - v4 not yet stable)
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-brand);
+  --font-mono: var(--font-mono);
+  
+  --color-brand-primary: var(--brand-primary);
+  --color-brand-secondary: var(--brand-secondary);
+  --color-brand-accent: var(--brand-accent);
+} */
+
+/* Dark mode disabled - uncomment to re-enable */
+/* @media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+    
+    --brand-primary-light: #1e3a8a;
+    --brand-secondary-light: #064e3b;
+    --brand-accent-light: #78350f;
+    
+    --text-primary: #f9fafb;
+    --text-secondary: #d1d5db;
+    --text-tertiary: #9ca3af;
+    
+    --border-default: #374151;
+  }
+} */
+
+/* Base Styles */
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-brand);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Font Loading States */
+.font-loading {
+  font-family: var(--font-system);
+}
+
+/* Utility Classes for Brand Colors */
+.bg-brand-primary { background-color: var(--brand-primary); }
+.bg-brand-secondary { background-color: var(--brand-secondary); }
+.bg-brand-accent { background-color: var(--brand-accent); }
+.text-brand-primary { color: var(--brand-primary); }
+.text-brand-secondary { color: var(--brand-secondary); }
+.text-brand-accent { color: var(--brand-accent); }
+.border-brand-primary { border-color: var(--brand-primary); }
+
+/* Ensure all text inputs have dark text */
+textarea, input[type="text"], input[type="email"], input[type="search"] {
+  color: #171316 !important;
+}
+
+/* Style placeholder text to be visible but lighter */
+textarea::placeholder,
+input::placeholder {
+  color: #9ca3af !important;
+  opacity: 1;
+}

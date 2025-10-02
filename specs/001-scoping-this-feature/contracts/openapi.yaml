@@ -1,0 +1,486 @@
+openapi: 3.0.3
+info:
+  title: AI Flight Search Chat API
+  description: API for AI-powered conversational flight search system
+  version: 1.0.0
+  contact:
+    name: Paylater Travel
+    url: https://paylatertravel.com.au
+
+servers:
+  - url: https://api.paylatertravel.com.au/v1
+    description: Production server
+  - url: http://localhost:3000/api
+    description: Development server
+
+paths:
+  /chat/start:
+    post:
+      summary: Start a new chat conversation
+      description: Initiates a new AI chat session for flight search
+      operationId: startChatConversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id:
+                  type: string
+                  description: Anonymous user identifier
+                  example: "anon_user_12345"
+                initial_query:
+                  type: string
+                  description: Optional initial search query
+                  example: "I want to go to Europe next month"
+              required:
+                - user_id
+      responses:
+        '201':
+          description: Conversation started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversation_id:
+                    type: string
+                    format: uuid
+                    example: "123e4567-e89b-12d3-a456-426614174000"
+                  status:
+                    type: string
+                    enum: [active]
+                    example: "active"
+                  initial_message:
+                    type: string
+                    example: "Hi! I can help you search for flights. Where would you like to go?"
+                required:
+                  - conversation_id
+                  - status
+                  - initial_message
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chat/{conversation_id}/messages:
+    post:
+      summary: Send message to chat conversation
+      description: Sends user message and receives AI response
+      operationId: sendChatMessage
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: User's message
+                  example: "I want to fly from Sydney to Tokyo in December"
+                context:
+                  type: object
+                  description: Additional context for the AI
+                  properties:
+                    user_location:
+                      type: string
+                      example: "Australia"
+              required:
+                - message
+      responses:
+        '200':
+          description: Message processed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message_id:
+                    type: string
+                    format: uuid
+                  response:
+                    type: string
+                    example: "Great! I can help you find flights from Sydney to Tokyo. What dates are you thinking about?"
+                  extracted_params:
+                    $ref: '#/components/schemas/SearchParameters'
+                  requires_clarification:
+                    type: boolean
+                    example: true
+                  clarification_prompt:
+                    type: string
+                    example: "Which Tokyo airport would you prefer - Narita (NRT) or Haneda (HND)?"
+                required:
+                  - message_id
+                  - response
+        '404':
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chat/{conversation_id}/generate-url:
+    post:
+      summary: Generate flight search URL
+      description: Converts conversation parameters into booking system URL
+      operationId: generateFlightSearchUrl
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: URL generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  search_url:
+                    type: string
+                    format: uri
+                    example: "https://app.paylatertravel.com.au/flightssearch/s/SYD/NRT/2025-12-15/2025-12-22?adults=1&children=0&infants=0&cabinClass=Y"
+                  search_params:
+                    $ref: '#/components/schemas/SearchParameters'
+                  is_complete:
+                    type: boolean
+                    example: true
+                required:
+                  - search_url
+                  - search_params
+                  - is_complete
+        '400':
+          description: Incomplete search parameters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Missing required parameters: departure_date"
+                  missing_fields:
+                    type: array
+                    items:
+                      type: string
+                    example: ["departure_date", "destination_code"]
+                  completion_percentage:
+                    type: integer
+                    example: 75
+
+  /conversations/{conversation_id}:
+    get:
+      summary: Get conversation details
+      description: Retrieves full conversation history and current state
+      operationId: getConversation
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Conversation retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '404':
+          description: Conversation not found
+
+  /destinations/recommendations:
+    get:
+      summary: Get destination recommendations
+      description: Returns categorized destination suggestions for guided discovery
+      operationId: getDestinationRecommendations
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [island-vibes, mountain-views, snowy-adventures, city-escapes, wine-tours, none-of-these]
+          description: Filter recommendations by category
+      responses:
+        '200':
+          description: Recommendations retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        category:
+                          type: string
+                          example: "island-vibes"
+                        display_name:
+                          type: string
+                          example: "Island vibes"
+                        destinations:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/DestinationRecommendation'
+
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Returns API health status
+      operationId: healthCheck
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  timestamp:
+                    type: string
+                    format: date-time
+                  services:
+                    type: object
+                    properties:
+                      database:
+                        type: string
+                        example: "connected"
+                      openai:
+                        type: string
+                        example: "available"
+
+components:
+  schemas:
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+        status:
+          type: string
+          enum: [active, completed, abandoned]
+        current_step:
+          type: string
+          enum: [initial, collecting, confirming, complete]
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        search_params:
+          $ref: '#/components/schemas/SearchParameters'
+        generated_url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+
+    SearchParameters:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        origin_code:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          example: "SYD"
+        origin_name:
+          type: string
+          example: "Sydney"
+        destination_code:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          example: "NRT"
+        destination_name:
+          type: string
+          example: "Tokyo Narita"
+        departure_date:
+          type: string
+          format: date
+          example: "2025-12-15"
+        return_date:
+          type: string
+          format: date
+          example: "2025-12-22"
+        trip_type:
+          type: string
+          enum: [return, oneway, multicity]
+          example: "return"
+        adults:
+          type: integer
+          minimum: 1
+          maximum: 9
+          example: 2
+        children:
+          type: integer
+          minimum: 0
+          maximum: 8
+          example: 0
+        infants:
+          type: integer
+          minimum: 0
+          maximum: 8
+          example: 0
+        cabin_class:
+          type: string
+          enum: [Y, S, C, F]
+          example: "Y"
+        multi_city_segments:
+          type: array
+          items:
+            $ref: '#/components/schemas/MultiCitySegment'
+        is_complete:
+          type: boolean
+          example: false
+
+    MultiCitySegment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        search_params_id:
+          type: string
+          format: uuid
+        sequence_order:
+          type: integer
+          minimum: 1
+          example: 1
+        origin_code:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          example: "DPS"
+        origin_name:
+          type: string
+          example: "Denpasar"
+        destination_code:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          example: "NAN"
+        destination_name:
+          type: string
+          example: "Nadi"
+        departure_date:
+          type: string
+          format: date
+          example: "2025-09-23"
+
+    DestinationRecommendation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        category:
+          type: string
+          example: "island-vibes"
+        category_display_name:
+          type: string
+          example: "Island vibes"
+        name:
+          type: string
+          example: "Fiji"
+        iata_code:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          example: "NAN"
+        description:
+          type: string
+          example: "Tropical paradise with crystal clear waters and friendly locals"
+        image_url:
+          type: string
+          format: uri
+          example: "https://cdn.paylatertravel.com/destinations/fiji.jpg"
+        display_order:
+          type: integer
+          example: 1
+        is_active:
+          type: boolean
+          example: true
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+        code:
+          type: string
+          description: Error code for programmatic handling
+        details:
+          type: object
+          description: Additional error details
+      required:
+        - error
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Chat
+    description: AI conversation endpoints
+  - name: Conversations
+    description: Conversation management
+  - name: Destinations
+    description: Travel destination data
+  - name: Health
+    description: System health monitoring
