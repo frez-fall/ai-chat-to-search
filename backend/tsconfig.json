@@ -2,7 +2,10 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "jsx": "preserve",
+
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -12,12 +15,14 @@
     "isolatedModules": true,
     "noEmit": true,
     "incremental": true,
+
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }
   },
   "include": [
+    "next-env.d.ts",
     "src/**/*",
     "tests/**/*"
   ],
