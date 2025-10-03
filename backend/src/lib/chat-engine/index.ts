@@ -34,7 +34,6 @@ export interface FlightInfo {
   }>;
 }
 
-// AI response interface
 export interface AIResponse {
   content: string;
   extracted_params?: FlightInfo;
@@ -43,16 +42,14 @@ export interface AIResponse {
   next_step?: 'collecting' | 'confirming' | 'complete';
 }
 
-// Chat engine configuration
 export interface ChatEngineConfig {
   model: string;
   temperature: number;
   maxTokens: number;
 }
 
-// Prefer a broadly available model by default
 const DEFAULT_CONFIG: ChatEngineConfig = {
-  model: 'gpt-4o-mini',
+  model: 'gpt-4o-mini', // broadly available
   temperature: 0.7,
   maxTokens: 1000,
 };
@@ -64,7 +61,6 @@ export class ChatEngine {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
-  // System prompt with IATA knowledge and travel assistant persona
   private getSystemPrompt(): string {
     return `You are a friendly, empathetic, and enthusiastic flight search assistant with comprehensive IATA airport code knowledge.
 
@@ -112,7 +108,6 @@ For dates less than 14 days away, respond with:
 Extract flight information and respond naturally while being helpful and excited about their travel plans.`;
   }
 
-  // Generate AI response for user message
   async generateResponse(
     userMessage: string,
     conversationHistory: Message[],
@@ -120,10 +115,9 @@ Extract flight information and respond naturally while being helpful and excited
     context?: { user_location?: string }
   ): Promise<AIResponse> {
     try {
-      // 1) Build conversation context
       const messages = this.buildMessageHistory(conversationHistory, userMessage);
 
-      // 2) Define Zod schema for tool parameters
+      // Zod schema for tool parameters
       const flightInfoParameters = z.object({
         origin_code: z.string().optional(),
         origin_name: z.string().optional(),
@@ -148,32 +142,48 @@ Extract flight information and respond naturally while being helpful and excited
         ).optional(),
       });
 
-      // 3) Define the tool via SDK helper (prevents "parameters: None" issues)
+      // Define tool via helper and pass as an ARRAY
       const extractFlightInfo = tool({
         name: 'extractFlightInfo',
         description: 'Extract flight search parameters from user input',
         parameters: flightInfoParameters,
+        // NOTE: no execute() here; we’re only collecting args, not running side effects
       });
 
-      // 4) Call Vercel AI SDK with tools + toolChoice
-      const result = await generateText({
-        model: openai(this.config.model || 'gpt-4o-mini'),
-        system: this.getSystemPrompt(),
-        messages,
-        temperature: this.config.temperature,
-        maxTokens: this.config.maxTokens,
-        tools: { extractFlightInfo },   // pass the tool object
-        toolChoice: 'auto',
-      });
+      // Try with tool; if serialization fails for some reason, fall back to no-tools
+      let result;
+      try {
+        result = await generateText({
+          model: openai(this.config.model || 'gpt-4o-mini'),
+          system: this.getSystemPrompt(),
+          messages,
+          temperature: this.config.temperature,
+          maxTokens: this.config.maxTokens,
+          tools: [extractFlightInfo],    // ← array form
+          toolChoice: 'auto',
+        });
+      } catch (toolErr: any) {
+        // Log the tool error and safely fall back to plain text generation
+        try {
+          console.error('Tool call failed, falling back (full):',
+            JSON.stringify(toolErr, Object.getOwnPropertyNames(toolErr)));
+        } catch {}
+        result = await generateText({
+          model: openai(this.config.model || 'gpt-4o-mini'),
+          system: this.getSystemPrompt(),
+          messages,
+          temperature: this.config.temperature,
+          maxTokens: this.config.maxTokens,
+        });
+      }
 
-      // 5) Extract tool call args if present
+      // Extract args if tool call happened
       let extractedParams: FlightInfo | undefined;
       if (result.toolCalls?.length) {
         const call = result.toolCalls.find((c) => c.toolName === 'extractFlightInfo');
         if (call) extractedParams = call.args as FlightInfo;
       }
 
-      // 6) Post-process
       const requiresClarification = this.needsClarification(result.text ?? '', extractedParams);
       const clarification_prompt = requiresClarification
         ? this.generateClarificationPrompt(extractedParams)
@@ -188,7 +198,6 @@ Extract flight information and respond naturally while being helpful and excited
         next_step,
       };
     } catch (error: any) {
-      // Log with full enumerable props (helps surface provider error)
       try {
         console.error(
           'Error generating AI response (full):',
@@ -201,7 +210,6 @@ Extract flight information and respond naturally while being helpful and excited
     }
   }
 
-  // Generate streaming response
   async generateStreamingResponse(
     userMessage: string,
     conversationHistory: Message[],
@@ -218,53 +226,35 @@ Extract flight information and respond naturally while being helpful and excited
     });
   }
 
-  // Generate initial greeting message
   generateInitialMessage(initialQuery?: string): string {
     if (initialQuery) {
       return `Hi! I can help you search for flights. I see you're interested in "${initialQuery}" - that sounds like an amazing trip! Let me help you find the perfect flights. Can you tell me more about your travel plans?`;
     }
-
     return `Hi! I'm here to help you find amazing flights for your next adventure! :airplane: Where would you like to go? Just tell me your travel plans in your own words - like "I want to visit Tokyo in spring" or "Family trip to Europe next summer" - and I'll help you find the perfect flights!`;
   }
 
-  // Build message history for AI context
   private buildMessageHistory(history: Message[], newMessage: string) {
     const messages = history.map((msg) => ({
       role: msg.role === 'user' ? ('user' as const) : ('assistant' as const),
       content: msg.content,
     }));
-
-    messages.push({
-      role: 'user' as const,
-      content: newMessage,
-    });
-
+    messages.push({ role: 'user' as const, content: newMessage });
     return messages;
   }
 
-  // Check if clarification is needed
   private needsClarification(response: string, params?: FlightInfo): boolean {
     if (!params) return false;
-
     const clarificationKeywords = [
-      'which airport',
-      'which city',
-      'multiple airports',
-      'airport preference',
-      'LHR, LGW',
-      'JFK, LGA',
-      'NRT, HND',
+      'which airport', 'which city', 'multiple airports', 'airport preference',
+      'LHR, LGW', 'JFK, LGA', 'NRT, HND',
     ];
-
-    return clarificationKeywords.some((keyword) =>
-      response.toLowerCase().includes(keyword.toLowerCase())
+    return clarificationKeywords.some((k) =>
+      response.toLowerCase().includes(k.toLowerCase())
     );
   }
 
-  // Generate clarification prompt
   private generateClarificationPrompt(params?: FlightInfo): string | undefined {
     if (!params) return undefined;
-
     const ambiguousDestinations: Record<string, string> = {
       LON: 'Which London airport - Heathrow (LHR), Gatwick (LGW), or Stansted (STN)?',
       NYC: 'Which New York airport - JFK, LaGuardia (LGA), or Newark (EWR)?',
@@ -272,7 +262,6 @@ Extract flight information and respond naturally while being helpful and excited
       PAR: 'Which Paris airport - Charles de Gaulle (CDG) or Orly (ORY)?',
       CHI: "Which Chicago airport - O'Hare (ORD) or Midway (MDW)?",
     };
-
     if (params.destination_name) {
       const city = params.destination_name.toLowerCase();
       if (city.includes('london')) return ambiguousDestinations.LON;
@@ -281,11 +270,9 @@ Extract flight information and respond naturally while being helpful and excited
       if (city.includes('paris')) return ambiguousDestinations.PAR;
       if (city.includes('chicago')) return ambiguousDestinations.CHI;
     }
-
     return undefined;
   }
 
-  // Determine next conversation step
   private determineNextStep(
     extractedParams?: FlightInfo,
     currentParams?: SearchParameters
@@ -310,11 +297,9 @@ Extract flight information and respond naturally while being helpful and excited
     if (hasOrigin && hasDestination && hasDeparture && hasReturn && hasMultiCity) {
       return 'confirming';
     }
-
     return 'collecting';
   }
 
-  // Merge extracted parameters with existing parameters
   mergeParameters(
     extracted: FlightInfo,
     current?: SearchParameters
@@ -331,11 +316,10 @@ Extract flight information and respond naturally while being helpful and excited
       children: extracted.children || current?.children || 0,
       infants: extracted.infants || current?.infants || 0,
       cabin_class: extracted.cabin_class || current?.cabin_class,
-      is_complete: false, // Will be calculated later
+      is_complete: false,
     };
   }
 }
 
-// Default chat engine instance
 export const chatEngine = new ChatEngine();
 export default chatEngine;
