@@ -20,19 +20,16 @@ export async function GET(
   try {
     const { conversationId } = params;
 
-    // Check if conversation exists
     const conversation = await db.getConversation(conversationId);
     if (!conversation) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
-    // Get search parameters
     const searchParams = await db.getSearchParameters(conversationId);
     if (!searchParams) {
       return NextResponse.json({ error: "Search parameters not found" }, { status: 404 });
     }
 
-    // Generate URL if parameters are complete
     let bookingUrl: string | undefined;
     if (searchParams.is_complete) {
       bookingUrl = urlGenerator.generateBookingURL(searchParams, {
@@ -71,10 +68,9 @@ export async function PUT(
     const { conversationId } = params;
     const body = await request.json();
 
-    // Validate request
+    // Validate request body
     const validatedBody = UpdateSearchParametersSchema.parse(body);
 
-    // Check if conversation exists and is active
     const conversation = await db.getConversation(conversationId);
     if (!conversation) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
@@ -83,18 +79,17 @@ export async function PUT(
       return NextResponse.json({ error: "Conversation is no longer active" }, { status: 400 });
     }
 
-    // Ensure existing parameters record exists
     const existingParams = await db.getSearchParameters(conversationId);
     if (!existingParams) {
       return NextResponse.json({ error: "Search parameters not found" }, { status: 404 });
     }
 
-    // Update parameters
+    // Update main parameters
     const updatedParams = await db.updateSearchParameters(conversationId, validatedBody);
 
     // Handle multi-city segments if provided
     if (validatedBody.trip_type === "multicity" && body.multi_city_segments) {
-      // Delete existing segments
+      // Delete existing segments for this params row
       await db.deleteMultiCitySegments(updatedParams.id);
 
       // Create new segments
@@ -108,4 +103,63 @@ export async function PUT(
         departure_date: seg.departure_date,
       }));
 
-      await db.createMultiCitySegments
+      await db.createMultiCitySegments(segments);
+    }
+
+    // Determine completeness
+    const isComplete = !!(
+      updatedParams.origin_code &&
+      updatedParams.destination_code &&
+      updatedParams.departure_date &&
+      (updatedParams.trip_type !== "return" || updatedParams.return_date) &&
+      (updatedParams.trip_type !== "multicity" || body.multi_city_segments?.length >= 2)
+    );
+
+    // Persist completeness if it changed
+    if (isComplete !== updatedParams.is_complete) {
+      await db.updateSearchParameters(conversationId, { is_complete: isComplete });
+    }
+
+    // Build URLs if complete
+    const finalParams = await db.getSearchParameters(conversationId);
+    let generatedUrl: string | undefined;
+    if (isComplete && finalParams) {
+      generatedUrl = urlGenerator.generateBookingURL(finalParams, {
+        utm_source: "chat",
+        utm_medium: "ai",
+        utm_campaign: "natural_language_search",
+      });
+
+      await db.updateConversation(conversationId, {
+        generated_url: generatedUrl,
+        current_step: "complete",
+      });
+    }
+
+    return NextResponse.json({
+      conversation_id: conversationId,
+      parameters: finalParams,
+      booking_url: generatedUrl,
+      shareable_url:
+        isComplete && finalParams ? urlGenerator.generateShareableURL(finalParams) : undefined,
+      is_complete: isComplete,
+    });
+  } catch (error) {
+    console.error("Error updating search parameters:", error);
+
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: "Validation error", details: error.errors },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        error: "Internal server error",
+        message: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
+    );
+  }
+}
