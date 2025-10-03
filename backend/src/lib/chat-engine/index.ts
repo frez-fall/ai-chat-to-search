@@ -11,7 +11,7 @@ import type { Message } from '../../models/message.js';
 import type { SearchParameters, UpdateSearchParametersInput } from '../../models/search-parameters.js';
 import type { Conversation } from '../../models/conversation.js';
 
-// Flight information extraction schema
+// Flight information extraction schema (TypeScript type)
 export interface FlightInfo {
   origin_code?: string;
   origin_name?: string;
@@ -50,8 +50,9 @@ export interface ChatEngineConfig {
   maxTokens: number;
 }
 
+// Prefer a broadly available model by default
 const DEFAULT_CONFIG: ChatEngineConfig = {
-  model: 'gpt-4o',
+  model: 'gpt-4o-mini',
   temperature: 0.7,
   maxTokens: 1000,
 };
@@ -119,17 +120,17 @@ Extract flight information and respond naturally while being helpful and excited
     context?: { user_location?: string }
   ): Promise<AIResponse> {
     try {
-      // Build conversation context
+      // 1) Build conversation context
       const messages = this.buildMessageHistory(conversationHistory, userMessage);
 
-      // ----- Vercel AI SDK: tools.parameters must be a Zod schema -----
+      // 2) Define Zod schema for tool parameters (required by Vercel AI SDK)
       const flightInfoParameters = z.object({
         origin_code: z.string().optional(),
         origin_name: z.string().optional(),
         destination_code: z.string().optional(),
         destination_name: z.string().optional(),
-        departure_date: z.string().optional(), // YYYY-MM-DD
-        return_date: z.string().optional(),    // YYYY-MM-DD
+        departure_date: z.string().optional(),  // YYYY-MM-DD
+        return_date: z.string().optional(),     // YYYY-MM-DD
         trip_type: z.enum(['return', 'oneway', 'multicity']).optional(),
         adults: z.number().optional(),
         children: z.number().optional(),
@@ -147,8 +148,9 @@ Extract flight information and respond naturally while being helpful and excited
         ).optional(),
       });
 
+      // 3) Call Vercel AI SDK with tools + toolChoice
       const result = await generateText({
-        model: openai(this.config.model),
+        model: openai(this.config.model || 'gpt-4o-mini'),
         system: this.getSystemPrompt(),
         messages,
         temperature: this.config.temperature,
@@ -159,38 +161,41 @@ Extract flight information and respond naturally while being helpful and excited
             parameters: flightInfoParameters,
           },
         },
+        toolChoice: 'auto',
       });
 
-      // Extract flight information from tool calls (AI SDK format)
+      // 4) Extract tool call args if present
       let extractedParams: FlightInfo | undefined;
-      if (result.toolCalls && result.toolCalls.length > 0) {
-        const flightInfoCall = result.toolCalls.find(
-          (call) => call.toolName === 'extractFlightInfo'
-        );
-        if (flightInfoCall) {
-          extractedParams = flightInfoCall.args as FlightInfo;
-        }
+      if (result.toolCalls?.length) {
+        const call = result.toolCalls.find((c) => c.toolName === 'extractFlightInfo');
+        if (call) extractedParams = call.args as FlightInfo;
       }
 
-      // Determine if clarification is needed
-      const requiresClarification = this.needsClarification(result.text, extractedParams);
-      const clarificationPrompt = requiresClarification
+      // 5) Post-process
+      const requiresClarification = this.needsClarification(result.text ?? '', extractedParams);
+      const clarification_prompt = requiresClarification
         ? this.generateClarificationPrompt(extractedParams)
         : undefined;
-
-      // Determine next conversation step
-      const nextStep = this.determineNextStep(extractedParams, currentParams);
+      const next_step = this.determineNextStep(extractedParams, currentParams);
 
       return {
-        content: result.text,
+        content: result.text ?? '',
         extracted_params: extractedParams,
         requires_clarification: requiresClarification,
-        clarification_prompt: clarificationPrompt,
-        next_step: nextStep,
+        clarification_prompt,
+        next_step,
       };
-    } catch (error) {
-      console.error('Error generating AI response:', error);
-      throw new Error('Failed to generate AI response');
+    } catch (error: any) {
+      // Log with full enumerable props (helps surface provider error)
+      try {
+        console.error(
+          'Error generating AI response (full):',
+          JSON.stringify(error, Object.getOwnPropertyNames(error))
+        );
+      } catch {
+        console.error('Error generating AI response:', error?.stack || error);
+      }
+      throw new Error(error?.message || 'Failed to generate AI response');
     }
   }
 
@@ -203,7 +208,7 @@ Extract flight information and respond naturally while being helpful and excited
     const messages = this.buildMessageHistory(conversationHistory, userMessage);
 
     return streamText({
-      model: openai(this.config.model),
+      model: openai(this.config.model || 'gpt-4o-mini'),
       system: this.getSystemPrompt(),
       messages,
       temperature: this.config.temperature,
@@ -239,7 +244,6 @@ Extract flight information and respond naturally while being helpful and excited
   private needsClarification(response: string, params?: FlightInfo): boolean {
     if (!params) return false;
 
-    // Check for ambiguous airports mentioned in response
     const clarificationKeywords = [
       'which airport',
       'which city',
@@ -259,7 +263,6 @@ Extract flight information and respond naturally while being helpful and excited
   private generateClarificationPrompt(params?: FlightInfo): string | undefined {
     if (!params) return undefined;
 
-    // Common airport disambiguations
     const ambiguousDestinations: Record<string, string> = {
       LON: 'Which London airport - Heathrow (LHR), Gatwick (LGW), or Stansted (STN)?',
       NYC: 'Which New York airport - JFK, LaGuardia (LGA), or Newark (EWR)?',
@@ -268,7 +271,6 @@ Extract flight information and respond naturally while being helpful and excited
       CHI: "Which Chicago airport - O'Hare (ORD) or Midway (MDW)?",
     };
 
-    // Check if destination needs clarification
     if (params.destination_name) {
       const city = params.destination_name.toLowerCase();
       if (city.includes('london')) return ambiguousDestinations.LON;
@@ -288,12 +290,9 @@ Extract flight information and respond naturally while being helpful and excited
   ): 'collecting' | 'confirming' | 'complete' {
     if (!extractedParams) return 'collecting';
 
-    // Check completeness
     const hasOrigin = extractedParams.origin_code || currentParams?.origin_code;
-    const hasDestination =
-      extractedParams.destination_code || currentParams?.destination_code;
-    const hasDeparture =
-      extractedParams.departure_date || currentParams?.departure_date;
+    const hasDestination = extractedParams.destination_code || currentParams?.destination_code;
+    const hasDeparture = extractedParams.departure_date || currentParams?.departure_date;
 
     const tripType = extractedParams.trip_type || currentParams?.trip_type || 'return';
     const hasReturn =
