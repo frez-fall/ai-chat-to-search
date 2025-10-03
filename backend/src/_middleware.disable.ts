@@ -6,6 +6,7 @@ const parseOrigins = () =>
   (process.env.ALLOWED_ORIGINS || "")
     .split(",")
     .map(s => s.trim())
+    .map(s => s.trim())
     .filter(Boolean);
 
 export function middleware(req: NextRequest) {
@@ -19,6 +20,7 @@ export function middleware(req: NextRequest) {
   const isAllowed =
     !origin || allowList.length === 0 || allowList.includes(origin);
 
+  // Preflight
   // Preflight
   if (req.method === "OPTIONS") {
     const res = new NextResponse(null, { status: isAllowed ? 204 : 403 });
@@ -34,12 +36,14 @@ export function middleware(req: NextRequest) {
   }
 
   // Actual request
+  // Actual request
   if (isAllowed) {
     const res = NextResponse.next();
     if (origin) {
       res.headers.set("Access-Control-Allow-Origin", origin);
       res.headers.set("Access-Control-Allow-Credentials", "true");
       res.headers.set("Vary", "Origin");
+      res.headers.set("x-cors-mw", "1"); // debug header
     }
     return res;
   }
