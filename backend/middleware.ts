@@ -9,14 +9,15 @@ const parseOrigins = () =>
     .filter(Boolean);
 
 export function middleware(req: NextRequest) {
-  // only affect API routes
+  // Only CORS-protect API routes
   if (!req.nextUrl.pathname.startsWith("/api/")) return NextResponse.next();
 
   const origin = req.headers.get("origin");
   const allowList = parseOrigins();
 
-  // allow if no origin (e.g., server-to-server) OR allow-list empty (dev) OR origin is listed
-  const isAllowed = !origin || allowList.length === 0 || allowList.includes(origin);
+  // Allow if server-to-server (no Origin), or allowList empty (dev), or exact match
+  const isAllowed =
+    !origin || allowList.length === 0 || allowList.includes(origin);
 
   // Preflight
   if (req.method === "OPTIONS") {
@@ -33,15 +34,17 @@ export function middleware(req: NextRequest) {
   }
 
   // Actual request
-  const res = NextResponse.next();
-  if (origin && isAllowed) {
-    res.headers.set("Access-Control-Allow-Origin", origin);
-    res.headers.set("Access-Control-Allow-Credentials", "true");
-    res.headers.set("Vary", "Origin");
+  if (isAllowed) {
+    const res = NextResponse.next();
+    if (origin) {
+      res.headers.set("Access-Control-Allow-Origin", origin);
+      res.headers.set("Access-Control-Allow-Credentials", "true");
+      res.headers.set("Vary", "Origin");
+    }
     return res;
   }
 
-  // Block disallowed origins with a clear error
+  // Block disallowed origins with a clear body
   return NextResponse.json(
     { error: "CORS: Origin not allowed", origin, allowList },
     { status: 403 }
