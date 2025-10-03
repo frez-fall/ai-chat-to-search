@@ -8,7 +8,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/services/database';
 import { validateCreateConversationInput } from '@/models/conversation';
-import { chatEngine } from '@/lib/chat-engine';
 import { v4 as uuidv4 } from 'uuid';
 
 // Request body schema
