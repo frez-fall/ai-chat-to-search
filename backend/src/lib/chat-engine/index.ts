@@ -109,106 +109,117 @@ Extract flight information and respond naturally while being helpful and excited
   }
 
   async generateResponse(
-    userMessage: string,
-    conversationHistory: Message[],
-    currentParams?: SearchParameters,
-    context?: { user_location?: string }
-  ): Promise<AIResponse> {
-    try {
-      const messages = this.buildMessageHistory(conversationHistory, userMessage);
+  userMessage: string,
+  conversationHistory: Message[],
+  currentParams?: SearchParameters,
+  context?: { user_location?: string }
+): Promise<AIResponse> {
+  try {
+    const messages = this.buildMessageHistory(conversationHistory, userMessage);
 
-      // Zod schema for tool parameters
-      const flightInfoParameters = z.object({
-        origin_code: z.string().optional(),
-        origin_name: z.string().optional(),
-        destination_code: z.string().optional(),
-        destination_name: z.string().optional(),
-        departure_date: z.string().optional(),  // YYYY-MM-DD
-        return_date: z.string().optional(),     // YYYY-MM-DD
-        trip_type: z.enum(['return', 'oneway', 'multicity']).optional(),
-        adults: z.number().optional(),
-        children: z.number().optional(),
-        infants: z.number().optional(),
-        cabin_class: z.enum(['Y', 'S', 'C', 'F']).optional(),
-        multi_city_segments: z.array(
-          z.object({
-            origin_code: z.string(),
-            origin_name: z.string().optional(),
-            destination_code: z.string(),
-            destination_name: z.string().optional(),
-            departure_date: z.string(),
-            sequence_order: z.number(),
-          })
-        ).optional(),
+    const flightInfoParameters = z.object({
+      origin_code: z.string().optional(),
+      origin_name: z.string().optional(),
+      destination_code: z.string().optional(),
+      destination_name: z.string().optional(),
+      departure_date: z.string().optional(),  // YYYY-MM-DD
+      return_date: z.string().optional(),     // YYYY-MM-DD
+      trip_type: z.enum(['return', 'oneway', 'multicity']).optional(),
+      adults: z.number().optional(),
+      children: z.number().optional(),
+      infants: z.number().optional(),
+      cabin_class: z.enum(['Y', 'S', 'C', 'F']).optional(),
+      multi_city_segments: z.array(
+        z.object({
+          origin_code: z.string(),
+          origin_name: z.string().optional(),
+          destination_code: z.string(),
+          destination_name: z.string().optional(),
+          departure_date: z.string(),
+          sequence_order: z.number(),
+        })
+      ).optional(),
+    });
+
+    const extractFlightInfo = tool({
+      name: 'extractFlightInfo',
+      description: 'Extract flight search parameters from user input',
+      parameters: flightInfoParameters,
+    });
+
+    // 1) First pass: ask model to call the tool if helpful
+    let result = await generateText({
+      model: openai(this.config.model || 'gpt-4o-mini'),
+      system: this.getSystemPrompt(),
+      messages,
+      temperature: this.config.temperature,
+      maxTokens: this.config.maxTokens,
+      tools: [extractFlightInfo],
+      toolChoice: 'auto',
+    });
+
+    // 2) If it did NOT call the tool, run a second pass that FORCES the tool call
+    let extractedParams: FlightInfo | undefined;
+    if (result.toolCalls?.length) {
+      const call = result.toolCalls.find(c => c.toolName === 'extractFlightInfo');
+      if (call) extractedParams = call.args as FlightInfo;
+    } else {
+      const forced = await generateText({
+        model: openai(this.config.model || 'gpt-4o-mini'),
+        system: this.getSystemPrompt(),
+        messages,
+        temperature: this.config.temperature,
+        maxTokens: this.config.maxTokens,
+        tools: [extractFlightInfo],
+        toolChoice: { type: 'tool', toolName: 'extractFlightInfo' }, // ← force
       });
-
-      // Define tool via helper and pass as an ARRAY
-      const extractFlightInfo = tool({
-        name: 'extractFlightInfo',
-        description: 'Extract flight search parameters from user input',
-        parameters: flightInfoParameters,
-        // NOTE: no execute() here; we’re only collecting args, not running side effects
-      });
-
-      // Try with tool; if serialization fails for some reason, fall back to no-tools
-      let result;
-      try {
-        result = await generateText({
-          model: openai(this.config.model || 'gpt-4o-mini'),
-          system: this.getSystemPrompt(),
-          messages,
-          temperature: this.config.temperature,
-          maxTokens: this.config.maxTokens,
-          tools: [extractFlightInfo],    // ← array form
-          toolChoice: 'auto',
-        });
-      } catch (toolErr: any) {
-        // Log the tool error and safely fall back to plain text generation
-        try {
-          console.error('Tool call failed, falling back (full):',
-            JSON.stringify(toolErr, Object.getOwnPropertyNames(toolErr)));
-        } catch {}
-        result = await generateText({
-          model: openai(this.config.model || 'gpt-4o-mini'),
-          system: this.getSystemPrompt(),
-          messages,
-          temperature: this.config.temperature,
-          maxTokens: this.config.maxTokens,
-        });
-      }
-
-      // Extract args if tool call happened
-      let extractedParams: FlightInfo | undefined;
-      if (result.toolCalls?.length) {
-        const call = result.toolCalls.find((c) => c.toolName === 'extractFlightInfo');
+      result = forced;
+      if (forced.toolCalls?.length) {
+        const call = forced.toolCalls.find(c => c.toolName === 'extractFlightInfo');
         if (call) extractedParams = call.args as FlightInfo;
       }
-
-      const requiresClarification = this.needsClarification(result.text ?? '', extractedParams);
-      const clarification_prompt = requiresClarification
-        ? this.generateClarificationPrompt(extractedParams)
-        : undefined;
-      const next_step = this.determineNextStep(extractedParams, currentParams);
-
-      return {
-        content: result.text ?? '',
-        extracted_params: extractedParams,
-        requires_clarification: requiresClarification,
-        clarification_prompt,
-        next_step,
-      };
-    } catch (error: any) {
-      try {
-        console.error(
-          'Error generating AI response (full):',
-          JSON.stringify(error, Object.getOwnPropertyNames(error))
-        );
-      } catch {
-        console.error('Error generating AI response:', error?.stack || error);
-      }
-      throw new Error(error?.message || 'Failed to generate AI response');
     }
+
+    // 3) Compute clarification based on what’s still missing
+    const needOrigin = !(extractedParams?.origin_code || currentParams?.origin_code);
+    const needDestination = !(extractedParams?.destination_code || currentParams?.destination_code);
+    const needDeparture = !(extractedParams?.departure_date || currentParams?.departure_date);
+
+    const requiresClarification = needOrigin || needDestination || needDeparture;
+
+    const clarification_prompt = requiresClarification
+      ? (() => {
+          const asks: string[] = [];
+          if (needOrigin) asks.push('your departure airport (e.g., SYD, MEL)');
+          if (needDestination) asks.push('your arrival airport in Japan (e.g., NRT, HND)');
+          if (needDeparture) asks.push('your departure date (YYYY-MM-DD)');
+          return `Got it! To search the best options, could you confirm ${asks.join(', ')}?`;
+        })()
+      : this.generateClarificationPrompt(extractedParams);
+
+    const next_step = requiresClarification
+      ? 'collecting'
+      : this.determineNextStep(extractedParams, currentParams);
+
+    return {
+      content: result.text ?? '',
+      extracted_params: extractedParams,
+      requires_clarification: requiresClarification,
+      clarification_prompt,
+      next_step,
+    };
+  } catch (error: any) {
+    try {
+      console.error(
+        'Error generating AI response (full):',
+        JSON.stringify(error, Object.getOwnPropertyNames(error))
+      );
+    } catch {
+      console.error('Error generating AI response:', error?.stack || error);
+    }
+    throw new Error(error?.message || 'Failed to generate AI response');
   }
+}
 
   async generateStreamingResponse(
     userMessage: string,
