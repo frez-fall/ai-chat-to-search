@@ -4,7 +4,7 @@
  */
 
 import { openai } from '@ai-sdk/openai';
-import { generateText, streamText } from 'ai';
+import { generateText, streamText, tool } from 'ai';
 import { z } from 'zod';
 
 import type { Message } from '../../models/message.js';
@@ -123,7 +123,7 @@ Extract flight information and respond naturally while being helpful and excited
       // 1) Build conversation context
       const messages = this.buildMessageHistory(conversationHistory, userMessage);
 
-      // 2) Define Zod schema for tool parameters (required by Vercel AI SDK)
+      // 2) Define Zod schema for tool parameters
       const flightInfoParameters = z.object({
         origin_code: z.string().optional(),
         origin_name: z.string().optional(),
@@ -148,30 +148,32 @@ Extract flight information and respond naturally while being helpful and excited
         ).optional(),
       });
 
-      // 3) Call Vercel AI SDK with tools + toolChoice
+      // 3) Define the tool via SDK helper (prevents "parameters: None" issues)
+      const extractFlightInfo = tool({
+        name: 'extractFlightInfo',
+        description: 'Extract flight search parameters from user input',
+        parameters: flightInfoParameters,
+      });
+
+      // 4) Call Vercel AI SDK with tools + toolChoice
       const result = await generateText({
         model: openai(this.config.model || 'gpt-4o-mini'),
         system: this.getSystemPrompt(),
         messages,
         temperature: this.config.temperature,
         maxTokens: this.config.maxTokens,
-        tools: {
-          extractFlightInfo: {
-            description: 'Extract flight search parameters from user input',
-            parameters: flightInfoParameters,
-          },
-        },
+        tools: { extractFlightInfo },   // pass the tool object
         toolChoice: 'auto',
       });
 
-      // 4) Extract tool call args if present
+      // 5) Extract tool call args if present
       let extractedParams: FlightInfo | undefined;
       if (result.toolCalls?.length) {
         const call = result.toolCalls.find((c) => c.toolName === 'extractFlightInfo');
         if (call) extractedParams = call.args as FlightInfo;
       }
 
-      // 5) Post-process
+      // 6) Post-process
       const requiresClarification = this.needsClarification(result.text ?? '', extractedParams);
       const clarification_prompt = requiresClarification
         ? this.generateClarificationPrompt(extractedParams)
