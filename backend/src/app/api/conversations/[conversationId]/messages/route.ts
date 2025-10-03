@@ -1,4 +1,3 @@
-// backend/src/app/api/conversations/[conversationId]/messages/route.ts
 import { z } from "zod";
 import { db } from "@/services/database";
 
@@ -11,9 +10,9 @@ const CreateMessageSchema = z.object({
 });
 
 // GET /api/conversations/:conversationId/messages
-export async function GET(_req: Request, { params }: any) {
+export async function GET(_req: Request, context: any) {
   try {
-    const { conversationId } = params ?? {};
+    const conversationId = context?.params?.conversationId as string | undefined;
     if (!conversationId) return json(400, { error: "conversationId is required" });
 
     const convo = await db.getConversation(conversationId);
@@ -28,9 +27,9 @@ export async function GET(_req: Request, { params }: any) {
 }
 
 // POST /api/conversations/:conversationId/messages
-export async function POST(req: Request, { params }: any) {
+export async function POST(req: Request, context: any) {
   try {
-    const { conversationId } = params ?? {};
+    const conversationId = context?.params?.conversationId as string | undefined;
     if (!conversationId) return json(400, { error: "conversationId is required" });
 
     const body = await req.json();

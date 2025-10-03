@@ -1,5 +1,3 @@
-// backend/src/app/api/conversations/[conversationId]/parameters/route.ts
-
 /**
  * Search Parameters API Endpoints
  * GET /api/conversations/:conversationId/parameters
@@ -12,7 +10,6 @@ import { db } from "@/services/database";
 import { UpdateSearchParametersSchema } from "@/models/search-parameters";
 import { urlGenerator } from "@/lib/url-generator";
 
-// Optional: edge runtime
 export const runtime = "edge";
 
 // ---------- GET ----------
@@ -77,17 +74,35 @@ export async function PUT(req: Request, context: any) {
     }
 
     const existingParams = await db.getSearchParameters(conversationId);
-    if (!existingParams) return NextResponse.json({ error: "Search parameters not found" }, { status: 404 });
+    if (!existingParams) {
+      return NextResponse.json({ error: "Search parameters not found" }, { status: 404 });
+    }
 
     // Update main parameters
     const updatedParams = await db.updateSearchParameters(conversationId, validatedBody);
 
     // Handle multi-city segments if provided
     if (validatedBody.trip_type === "multicity" && body.multi_city_segments) {
-      await db.deleteMultiCitySegments(updatedParams.id);
+      // Ensure we have a definite params row with an id
+      const paramsRow =
+        (updatedParams && (updatedParams as any).id)
+          ? updatedParams
+          : await db.getSearchParameters(conversationId);
 
-      const segments = body.multi_city_segments.map((seg: any, index: number) => ({
-        search_params_id: updatedParams.id,
+      const paramsId = (paramsRow as any)?.id as string | undefined;
+      if (!paramsId) {
+        return NextResponse.json(
+          { error: "Could not resolve search parameters ID after update" },
+          { status: 500 }
+        );
+      }
+
+      // Delete existing segments for this params row
+      await db.deleteMultiCitySegments(paramsId);
+
+      // Create new segments
+      const segments = (body.multi_city_segments as any[]).map((seg, index) => ({
+        search_params_id: paramsId,
         sequence_order: index + 1,
         origin_code: seg.origin_code,
         origin_name: seg.origin_name,
