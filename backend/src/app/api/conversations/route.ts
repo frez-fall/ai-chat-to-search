@@ -14,8 +14,11 @@ import { validateCreateConversationInput } from '@/models/conversation'; // (kep
 import { chatEngine } from '@/lib/chat-engine';
 import { v4 as uuidv4 } from 'uuid';
 
+// If you use any Node APIs or non-Edge libs during diag, keep Node runtime:
+export const runtime = 'nodejs';
+
 // ---------- CORS CONFIG ----------
-const ENV_ALLOWED = process.env.ALLOWED_ORIGIN ?? ''; // e.g. https://paylatertravel-au.webflow.io
+const ENV_ALLOWED = process.env.ALLOWED_ORIGINS ?? process.env.ALLOWED_ORIGIN ?? ''; // allow either var name
 const ALLOWED_ORIGINS = new Set(
   ENV_ALLOWED ? ENV_ALLOWED.split(',').map((s) => s.trim()) : []
 );
@@ -41,8 +44,7 @@ function buildCorsHeaders(req: Request): Headers {
 
   if (origin && ALLOWED_ORIGINS.has(origin)) {
     headers.set('Access-Control-Allow-Origin', origin);
-    // Turn on if you use cookies or Authorization headers in browsers:
-    headers.set('Access-Control-Allow-Credentials', 'true');
+    headers.set('Access-Control-Allow-Credentials', 'true'); // enable if using cookies/auth
   }
 
   return headers;
@@ -50,7 +52,7 @@ function buildCorsHeaders(req: Request): Headers {
 
 // ---------- SCHEMAS ----------
 const CreateConversationRequestSchema = z.object({
-  user_id: z.string().optional(),         // Optional, will generate if not provided
+  user_id: z.string().optional(),   // Optional, will generate if not provided
   initial_query: z.string().optional(),
 });
 
@@ -65,18 +67,44 @@ export async function POST(request: NextRequest) {
   const headers = buildCorsHeaders(request);
 
   try {
-    const body = await request.json();
-
+    const body = await request.json().catch(() => ({} as unknown));
     // Validate request
     const validatedBody = CreateConversationRequestSchema.parse(body);
+
+    // ---------- STEP 1A: Minimal OpenAI diagnostic (no tools) ----------
+    // Call with ?diag=minimal to quickly verify OPENAI_API_KEY + model in Production.
+    const url = new URL(request.url);
+    if (url.searchParams.get('diag') === 'minimal') {
+      try {
+        const { generateText } = await import('ai');
+        const { openai } = await import('@ai-sdk/openai');
+
+        const r = await generateText({
+          model: openai('gpt-4o-mini'), // use a widely available model
+          prompt: 'ping',
+          maxTokens: 8,
+          temperature: 0,
+        });
+
+        return NextResponse.json(
+          { ok: true, diag: 'minimal', text: r.text },
+          { status: 200, headers }
+        );
+      } catch (e: any) {
+        console.error('AI minimal diag failed:', e?.stack || e);
+        return NextResponse.json(
+          { error: 'AI minimal diag failed', message: String(e?.message || e) },
+          { status: 500, headers }
+        );
+      }
+    }
+    // ---------- END DIAGNOSTIC ----------
 
     // Generate user_id if not provided
     const userId = validatedBody.user_id || `anon_${uuidv4()}`;
 
     // Create conversation
-    const conversation = await db.createConversation({
-      user_id: userId,
-    });
+    const conversation = await db.createConversation({ user_id: userId });
 
     // Create initial search parameters
     await db.createSearchParameters({
@@ -108,7 +136,7 @@ export async function POST(request: NextRequest) {
         content: validatedBody.initial_query,
       });
 
-      // Generate AI response
+      // Generate AI response (uses Vercel AI SDK + tools in chat-engine)
       const messages = await db.getMessages(conversation.id);
       const searchParams = await db.getSearchParameters(conversation.id);
 
@@ -165,19 +193,14 @@ export async function POST(request: NextRequest) {
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        {
-          error: 'Validation error',
-          details: error.errors,
-        },
+        { error: 'Validation error', details: error.errors },
         { status: 400, headers }
       );
     }
 
+    // TEMP: surface provider error message during debugging
     return NextResponse.json(
-      {
-        error: 'Internal server error',
-        message: error?.message ?? 'Unknown error',
-      },
+      { error: 'Internal server error', message: error?.message ?? 'Unknown error' },
       { status: 500, headers }
     );
   }
@@ -207,10 +230,7 @@ export async function GET(request: NextRequest) {
     console.error('Error listing conversations:', error);
 
     return NextResponse.json(
-      {
-        error: 'Internal server error',
-        message: error?.message ?? 'Unknown error',
-      },
+      { error: 'Internal server error', message: error?.message ?? 'Unknown error' },
       { status: 500, headers }
     );
   }
