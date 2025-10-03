@@ -5,23 +5,25 @@ import type { NextRequest } from "next/server";
 const parseOrigins = () =>
   (process.env.ALLOWED_ORIGINS || "")
     .split(",")
-    .map(s => s.trim())
+    .map((s) => s.trim())
     .filter(Boolean);
 
 export function middleware(req: NextRequest) {
-  // ✅ ensure this code runs for every request and then self-limit to /api/*
-  if (!req.nextUrl.pathname.startsWith("/api/")) return NextResponse.next();
+  // Run for all routes but only handle /api/*
+  if (!req.nextUrl.pathname.startsWith("/api/")) {
+    return NextResponse.next();
+  }
+
+  // :mag_right: Debug: see the incoming Origin and the allow-list the server sees
+  console.log("CORS origin:", req.headers.get("origin"), "allow:", parseOrigins());
 
   const origin = req.headers.get("origin");
   const allowList = parseOrigins();
 
-  // temporary debug — remove after verifying in logs
-  console.log("CORS origin:", origin, "allow:", allowList);
+  // Allow if: no Origin (server-to-server), or allow-list empty, or exact match
+  const isAllowed = !origin || allowList.length === 0 || allowList.includes(origin);
 
-  const isAllowed =
-    !origin || allowList.length === 0 || allowList.includes(origin);
-
-  // Preflight
+  // --- Preflight (OPTIONS) ---
   if (req.method === "OPTIONS") {
     const res = new NextResponse(null, { status: isAllowed ? 204 : 403 });
     if (origin && isAllowed) res.headers.set("Access-Control-Allow-Origin", origin);
@@ -32,27 +34,33 @@ export function middleware(req: NextRequest) {
     );
     if (isAllowed) res.headers.set("Access-Control-Allow-Credentials", "true");
     res.headers.set("Vary", "Origin");
-    res.headers.set("x-cors-mw", "1"); // debug header
+
+    // :test_tube: Debug header to prove middleware executed
+    res.headers.set("x-cors-mw", "1");
     return res;
   }
 
-  // Actual request
+  // --- Actual request (GET/POST/...) ---
   if (isAllowed) {
     const res = NextResponse.next();
     if (origin) {
       res.headers.set("Access-Control-Allow-Origin", origin);
       res.headers.set("Access-Control-Allow-Credentials", "true");
       res.headers.set("Vary", "Origin");
-      res.headers.set("x-cors-mw", "1"); // debug header
     }
+
+    // :test_tube: Debug header to prove middleware executed
+    res.headers.set("x-cors-mw", "1");
     return res;
   }
 
+  // Disallowed origin
   return NextResponse.json(
     { error: "CORS: Origin not allowed", origin, allowList },
     { status: 403 }
   );
 }
 
-// 👇 run for ALL paths so we're sure middleware executes
+// :gear: Force middleware to run for all paths; we self-filter to /api/* above
 export const config = { matcher: ["/:path*"] };
+
