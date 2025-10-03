@@ -2,10 +2,8 @@
 import { z } from "zod";
 import { db } from "@/services/database";
 
-// If you prefer Node APIs, use: export const runtime = "nodejs";
 export const runtime = "edge";
 
-// Schema to validate POST body when creating a message
 const CreateMessageSchema = z.object({
   role: z.enum(["user", "assistant", "system"]),
   content: z.string().min(1, "content is required"),
@@ -13,18 +11,13 @@ const CreateMessageSchema = z.object({
 });
 
 // GET /api/conversations/:conversationId/messages
-export async function GET(
-  _req: Request,
-  { params }: { params: { conversationId: string } }
-) {
+export async function GET(_req: Request, { params }: any) {
   try {
-    const { conversationId } = params;
+    const { conversationId } = params ?? {};
+    if (!conversationId) return json(400, { error: "conversationId is required" });
 
-    // Optional: ensure conversation exists
     const convo = await db.getConversation(conversationId);
-    if (!convo) {
-      return json(404, { error: "Conversation not found" });
-    }
+    if (!convo) return json(404, { error: "Conversation not found" });
 
     const messages = await db.getMessages(conversationId);
     return json(200, { messages });
@@ -35,21 +28,17 @@ export async function GET(
 }
 
 // POST /api/conversations/:conversationId/messages
-export async function POST(
-  req: Request,
-  { params }: { params: { conversationId: string } }
-) {
+export async function POST(req: Request, { params }: any) {
   try {
-    const { conversationId } = params;
+    const { conversationId } = params ?? {};
+    if (!conversationId) return json(400, { error: "conversationId is required" });
+
     const body = await req.json();
     const data = CreateMessageSchema.parse(body);
 
-    // Optional: ensure conversation exists/active
     const convo = await db.getConversation(conversationId);
     if (!convo) return json(404, { error: "Conversation not found" });
-    if (convo.status !== "active") {
-      return json(400, { error: "Conversation is no longer active" });
-    }
+    if (convo.status !== "active") return json(400, { error: "Conversation is no longer active" });
 
     await db.createMessage({
       conversation_id: conversationId,
@@ -68,7 +57,6 @@ export async function POST(
   }
 }
 
-/** small helper */
 function json(status: number, data: unknown) {
   return new Response(JSON.stringify(data), {
     status,
