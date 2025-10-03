@@ -2,23 +2,26 @@
 
 /**
  * Search Parameters API Endpoints
- * GET /api/conversations/:conversationId/parameters - Get search parameters
- * PUT /api/conversations/:conversationId/parameters - Update search parameters
+ * GET /api/conversations/:conversationId/parameters
+ * PUT /api/conversations/:conversationId/parameters
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/services/database";
 import { UpdateSearchParametersSchema } from "@/models/search-parameters";
 import { urlGenerator } from "@/lib/url-generator";
 
-// GET /api/conversations/:conversationId/parameters
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: { conversationId: string } }
-) {
+// Optional: edge runtime
+export const runtime = "edge";
+
+// ---------- GET ----------
+export async function GET(_req: Request, context: any) {
   try {
-    const { conversationId } = params;
+    const conversationId = context?.params?.conversationId as string | undefined;
+    if (!conversationId) {
+      return NextResponse.json({ error: "conversationId is required" }, { status: 400 });
+    }
 
     const conversation = await db.getConversation(conversationId);
     if (!conversation) {
@@ -48,51 +51,41 @@ export async function GET(
         : undefined,
     });
   } catch (error) {
-    console.error("Error getting search parameters:", error);
+    console.error("GET parameters error:", error);
     return NextResponse.json(
-      {
-        error: "Internal server error",
-        message: error instanceof Error ? error.message : "Unknown error",
-      },
+      { error: "Internal server error", message: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
     );
   }
 }
 
-// PUT /api/conversations/:conversationId/parameters
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { conversationId: string } }
-) {
+// ---------- PUT ----------
+export async function PUT(req: Request, context: any) {
   try {
-    const { conversationId } = params;
-    const body = await request.json();
+    const conversationId = context?.params?.conversationId as string | undefined;
+    if (!conversationId) {
+      return NextResponse.json({ error: "conversationId is required" }, { status: 400 });
+    }
 
-    // Validate request body
+    const body = await req.json();
     const validatedBody = UpdateSearchParametersSchema.parse(body);
 
     const conversation = await db.getConversation(conversationId);
-    if (!conversation) {
-      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
-    }
+    if (!conversation) return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     if (conversation.status !== "active") {
       return NextResponse.json({ error: "Conversation is no longer active" }, { status: 400 });
     }
 
     const existingParams = await db.getSearchParameters(conversationId);
-    if (!existingParams) {
-      return NextResponse.json({ error: "Search parameters not found" }, { status: 404 });
-    }
+    if (!existingParams) return NextResponse.json({ error: "Search parameters not found" }, { status: 404 });
 
     // Update main parameters
     const updatedParams = await db.updateSearchParameters(conversationId, validatedBody);
 
     // Handle multi-city segments if provided
     if (validatedBody.trip_type === "multicity" && body.multi_city_segments) {
-      // Delete existing segments for this params row
       await db.deleteMultiCitySegments(updatedParams.id);
 
-      // Create new segments
       const segments = body.multi_city_segments.map((seg: any, index: number) => ({
         search_params_id: updatedParams.id,
         sequence_order: index + 1,
@@ -115,14 +108,13 @@ export async function PUT(
       (updatedParams.trip_type !== "multicity" || body.multi_city_segments?.length >= 2)
     );
 
-    // Persist completeness if it changed
     if (isComplete !== updatedParams.is_complete) {
       await db.updateSearchParameters(conversationId, { is_complete: isComplete });
     }
 
-    // Build URLs if complete
     const finalParams = await db.getSearchParameters(conversationId);
     let generatedUrl: string | undefined;
+
     if (isComplete && finalParams) {
       generatedUrl = urlGenerator.generateBookingURL(finalParams, {
         utm_source: "chat",
@@ -145,20 +137,12 @@ export async function PUT(
       is_complete: isComplete,
     });
   } catch (error) {
-    console.error("Error updating search parameters:", error);
-
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Validation error", details: error.errors },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Validation error", details: error.errors }, { status: 400 });
     }
-
+    console.error("PUT parameters error:", error);
     return NextResponse.json(
-      {
-        error: "Internal server error",
-        message: error instanceof Error ? error.message : "Unknown error",
-      },
+      { error: "Internal server error", message: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
     );
   }
