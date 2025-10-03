@@ -146,4 +146,4 @@ ai-chat-to-search/
 For issues or questions:
 - Check the [Quickstart Guide](specs/001-scoping-this-feature/quickstart.md)
 - Review the [Development Guide](specs/001-scoping-this-feature/CLAUDE.md)
-- Verify all API keys are correctly configured
+- Verify all API keys are correctly configured.
